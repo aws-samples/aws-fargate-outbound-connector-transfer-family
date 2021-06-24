@@ -1,0 +1,396 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Template to accompany AWS Transfer Family with AWS Fargate outbound connectors
+Metadata:
+  License:
+    Description: |
+      Copyright 2019 Amazon.com, Inc. or its affiliates. All Rights Reserved.
+
+      Permission is hereby granted, free of charge, to any person obtaining a copy of this
+      software and associated documentation files (the "Software"), to deal in the Software
+      without restriction, including without limitation the rights to use, copy, modify,
+      merge, publish, distribute, sublicense, and/or sell copies of the Software, and to
+      permit persons to whom the Software is furnished to do so.
+
+      THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED,
+      INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A
+      PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT
+      HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
+      OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
+      SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+Parameters:
+  ServerHost:
+    Default: 3.82.138.127
+    Type: String
+    Description: Enter external SFTP server hostname/IP address
+  Username:
+    Default: Administrator
+    Type: String
+    Description: Enter username credentials for external SFTP server
+  Password:
+    Default: ;n)$C5=8i3ok4TZVSwRHMag=w)WwFDm@
+    Type: String
+    Description: Enter password credentials for external SFTP server
+  Image:
+    Default: public.ecr.aws/o0m1q5e4/sftptransferblogtest
+    Type: String
+    Description: Enter your own container image or use the default for demo purposes
+  DirectoryPath:
+    Default: /C:/Users/demo-user/
+    Type: String
+    Description: SFTP server path containing files
+    
+Resources:
+  # Create a dedicated VPC with internet connectivity
+  SftpSecret:
+    Type: 'AWS::SecretsManager::Secret'
+    Properties:
+      Name: sftpOutboundConnectorSecret
+      Description: This secret has a hardcoded password in SecretString (use GenerateSecretString instead)
+      SecretString: !Sub '{"SFTP_TEST_SERVER_HOST": "${ServerHost}","SFTP_TEST_SERVER_USERNAME":"${Username}","SFTP_TEST_SERVER_PASSWORD": "${Password}"}'
+      Tags:
+        -
+          Key: Name
+          Value: TransferSFTPFargateBlogSecret
+  sftpVPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: 10.11.12.0/24
+      EnableDnsSupport: 'true'
+      EnableDnsHostnames: 'true'
+      InstanceTenancy: default
+      Tags:
+      - Key: Name
+        Value: TransferSFTPFargateBlogVPC
+  sftpSubnet1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref 'sftpVPC'
+      CidrBlock: 10.11.12.0/25
+      AvailabilityZone:
+        Fn::Select:
+          - 0
+          - Fn::GetAZs: ""
+      MapPublicIpOnLaunch: 'True'
+      Tags:
+      - Key: Name
+        Value: TransferSFTPFargateBlogSubnet1
+  sftpSubnet2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref 'sftpVPC'
+      CidrBlock: 10.11.12.128/25
+      AvailabilityZone:
+        Fn::Select:
+          - 1
+          - Fn::GetAZs: ""
+      MapPublicIpOnLaunch: 'True'
+      Tags:
+      - Key: Name
+        Value: TransferSFTPFargateBlogSubnet2
+  sftpInternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+      - Key: Name
+        Value: TransferSFTPFargateBlogIGW
+  sftpAttachGateway:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref 'sftpVPC'
+      InternetGatewayId: !Ref 'sftpInternetGateway'
+  sftpRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref 'sftpVPC'
+      Tags:
+      - Key: Name
+        Value: TransferSFTPFargateBlogRouteTable
+  sftpSubnet1RouteAssociaton:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref 'sftpSubnet1'
+      RouteTableId: !Ref 'sftpRouteTable'
+  sftpSubnet2RouteAssociaton:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref 'sftpSubnet2'
+      RouteTableId: !Ref 'sftpRouteTable'
+  sftpRoutetoInternet:
+    Type: AWS::EC2::Route
+    DependsOn: sftpInternetGateway
+    Properties:
+      RouteTableId: !Ref 'sftpRouteTable'
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref 'sftpInternetGateway'
+      
+  sftpECSCluster:
+    Type: AWS::ECS::Cluster
+    Properties:
+      # Enable Container Insights for detailed information on containers
+      ClusterSettings:
+        - Name: containerInsights
+          Value: enabled
+      Tags:
+        - Key: Name
+          Value: TransferSFTPFargateBlogCluster
+            
+  # A security group for the containers we will run in Fargate.
+  FargateContainerSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Default security group for Fargate task with port 80 open to Internet
+      VpcId: !Ref 'sftpVPC'
+      SecurityGroupIngress:
+      - IpProtocol: tcp
+        FromPort: 80
+        ToPort: 80
+        CidrIp: 0.0.0.0/0
+      - IpProtocol: tcp
+        FromPort: 443
+        ToPort: 443
+        CidrIp: 0.0.0.0/0
+      - IpProtocol: tcp
+        FromPort: 22
+        ToPort: 22
+        CidrIp: 0.0.0.0/0
+      SecurityGroupEgress:
+      - IpProtocol: tcp
+        FromPort: 80
+        ToPort: 80
+        CidrIp: 0.0.0.0/0
+      - IpProtocol: tcp
+        FromPort: 443
+        ToPort: 443
+        CidrIp: 0.0.0.0/0
+      - IpProtocol: tcp
+        FromPort: 22
+        ToPort: 22
+        CidrIp: 0.0.0.0/0
+        
+  ECSTaskExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service: [ecs-tasks.amazonaws.com]
+          Action: ['sts:AssumeRole']
+      Path: / 
+      Policies:
+        - PolicyName: TransferSFTPFargateExecutionRolePolicy
+          PolicyDocument:
+            Statement:
+            - Effect: Allow
+              Action:
+                # Allow the ECS Tasks to download images from ECR
+                - 'ecr:GetAuthorizationToken'
+                - 'ecr:BatchCheckLayerAvailability'
+                - 'ecr:GetDownloadUrlForLayer'
+                - 'ecr:BatchGetImage'
+
+                # Allow the ECS tasks to upload logs to CloudWatch
+                - 'logs:CreateLogStream'
+                - 'logs:PutLogEvents'
+              Resource: '*'
+            - Effect: Allow
+              Action:
+                - 'secretsmanager:GetResourcePolicy'
+                - 'secretsmanager:DescribeSecret'
+                - 'secretsmanager:ListSecrets'
+                - 'secretsmanager:GetSecretValue'
+                - 'secretsmanager:ListSecretVersionIds'
+              Resource:
+                - !Ref 'SftpSecret'
+            - Effect: Allow
+              Action:
+                - 's3:PutObject'
+                - 's3:GetObject'
+              Resource: 
+                - !Sub "arn:aws:s3:::sftptransferfargate-${AWS::Region}-${AWS::AccountId}/*"
+            - Effect: Allow
+              Action:
+                - 's3:ListBucket'
+              Resource: 
+                - !Sub "arn:aws:s3:::sftptransferfargate-${AWS::Region}-${AWS::AccountId}"
+                
+  TaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      RequiresCompatibilities:
+        - "FARGATE"
+      NetworkMode: awsvpc
+      Cpu: 256
+      Memory: 0.5GB
+      TaskRoleArn: !Ref ECSTaskExecutionRole
+      ExecutionRoleArn: !Ref ECSTaskExecutionRole
+      ContainerDefinitions:
+        - Name: "SftpOutboundConnector"
+          Image: !Ref Image
+          Environment:
+            - Name: BUCKET
+              Value: !Sub "sftptransferfargate-${AWS::Region}-${AWS::AccountId}"
+            - Name: PORT
+              Value: 22
+            - Name: REGION
+              Value: !Sub "${AWS::Region}"
+            - Name: SECRET_NAME
+              Value: sftpOutboundConnectorSecret
+            - Name: SFTP_DIRECTORY_PATH
+              Value: !Ref DirectoryPath
+          LogConfiguration:
+            LogDriver: "awslogs"
+            Options:
+              awslogs-group: !Ref CloudWatchLogsGroup
+              awslogs-region: !Sub "${AWS::Region}"
+              awslogs-stream-prefix: "ecs"
+              
+  CloudWatchLogsGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Ref AWS::StackName
+      RetentionInDays: 365  
+          
+  s3Bucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: True
+        BlockPublicPolicy: True
+        IgnorePublicAcls: True
+        RestrictPublicBuckets: True
+      BucketName: !Sub "sftptransferfargate-${AWS::Region}-${AWS::AccountId}"
+  s3BucketIamRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+          - Action:
+              - sts:AssumeRole
+            Effect: Allow
+            Principal:
+              Service:
+                - transfer.amazonaws.com
+        Version: '2012-10-17'
+  s3BucketRolePolicy:
+    Type: AWS::IAM::Policy
+    DependsOn: s3Bucket
+    Properties:
+      PolicyDocument:
+        Statement:
+          - Effect: Allow
+            Resource:
+              - !GetAtt s3Bucket.Arn
+              - !Join [ "/", [ !GetAtt s3Bucket.Arn, "*" ] ]
+            Action:
+              - "s3:GetObject"
+              - "s3:GetObjectVersion"
+              - "s3:PutObject"
+              - "s3:DeleteObject"
+              - "s3:DeleteObjectVersion"
+        Version: '2012-10-17'
+      PolicyName: policy
+      Roles:
+        - !Ref 's3BucketIamRole'
+       
+  SftpLoggingRole:
+    Type: AWS::IAM::Role
+    Properties:
+      Path: "/"
+      AssumeRolePolicyDocument: 
+        Version: "2012-10-17"
+        Statement: 
+          - 
+            Effect: "Allow"
+            Principal: 
+              Service: 
+                - transfer.amazonaws.com
+            Action: 
+              - "sts:AssumeRole"
+      Policies:
+        - 
+         PolicyName: "LoggerPolicy"
+         PolicyDocument:
+           Version: "2012-10-17"
+           Statement:
+              - 
+                Effect: "Allow"
+                Action: 
+                  - "logs:CreateLogGroup"
+                  - "logs:CreateLogStream"
+                  - "logs:PutLogEvents"
+                Resource: "*"
+                
+  SftpServer:
+    Type: AWS::Transfer::Server
+    Properties:
+      LoggingRole: !GetAtt SftpLoggingRole.Arn
+      EndpointType: PUBLIC
+      Tags:
+      - Key: Name
+        Value: sftpServerWithFargate
+  
+  SftpUserRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - transfer.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      Path: /
+      Policies:
+        - PolicyName: AllowListingOfUserFolder
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:ListBucket
+                Resource: !GetAtt s3Bucket.Arn
+        - PolicyName: HomeDirObjectAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:PutObject
+                  - s3:GetObject
+                  - s3:GetObjectVersion
+                  - s3:DeleteObject
+                  - s3:DeleteObjectVersion
+                Resource: !Sub "${s3Bucket.Arn}/*"
+  TestUser:
+    Type: AWS::Transfer::User
+    Properties:
+      ServerId: !GetAtt SftpServer.ServerId
+      UserName: testuser
+      HomeDirectory: !Sub "/${s3Bucket}/"
+      Role: !GetAtt SftpUserRole.Arn
+      
+Outputs:
+  bucketName:
+    Description: S3 Bucket Name
+    Value: !Ref s3Bucket
+  iamRole1ForS3Access:
+    Description: S3 IAM Role for Transfer and File Gateway
+    Value: !GetAtt s3BucketIamRole.Arn
+  vpcID:
+    Description: ID of VPC
+    Value: !Ref sftpVPC
+  subnet1VPC:
+    Description: AZ of subnet 1
+    Value: !GetAtt sftpSubnet1.AvailabilityZone
+  subnet1ID:
+    Description: ID of Subnet 1
+    Value: !Ref sftpSubnet1
+  subnet2VPC:
+    Description: AZ of subnet 2
+    Value: !GetAtt sftpSubnet2.AvailabilityZone
+  subnet2ID:
+    Description: ID of Subnet 2
+    Value: !Ref sftpSubnet2
