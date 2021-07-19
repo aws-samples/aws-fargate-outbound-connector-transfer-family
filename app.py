@@ -116,9 +116,11 @@ for s3_object in my_bucket.objects.all():
 #UNZIP AN FILES THAT ARE ZIPPED IN MEMORY
 dir = os.listdir()
 for object in dir:
-	with zipfile.ZipFile(object,"r") as zip_ref:
-		zip_ref.extractall(path)
-    
+    try:
+        with zipfile.ZipFile(object,"r") as zip_ref:
+            zip_ref.extractall(path)
+    except Exception:
+        pass
 
 #UPLOAD ALL ZIPPED FILES TO S3
 for subdir, dirs, files in os.walk(path):
