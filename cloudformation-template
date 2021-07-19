@@ -19,23 +19,18 @@ Metadata:
       SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 Parameters:
   ServerHost:
-    Default: 3.82.138.127
     Type: String
     Description: Enter external SFTP server hostname/IP address
   Username:
-    Default: Administrator
     Type: String
     Description: Enter username credentials for external SFTP server
   Password:
-    Default: ;n)$C5=8i3ok4TZVSwRHMag=w)WwFDm@
     Type: String
     Description: Enter password credentials for external SFTP server
   Image:
-    Default: public.ecr.aws/o0m1q5e4/sftptransferblogtest
     Type: String
     Description: Enter your own container image or use the default for demo purposes
   DirectoryPath:
-    Default: /C:/Users/demo-user/
     Type: String
     Description: SFTP server path containing files
     
