@@ -36,6 +36,7 @@ You must [install Git](https://git-scm.com/book/en/v2/Getting-Started-Installing
 1.	Run the following command to copy the Git repository, and navigate to the folder aws-fargate-outbound-connector-transfer-family.
 
 `git clone https://github.com/aws-samples/aws-fargate-outbound-connector-transfer-family.git`
+
 2.	Navigate to the Amazon ECR console.
 3.	Create a private repository and give your repository a name.  
 
